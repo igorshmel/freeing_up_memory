@@ -40,14 +40,14 @@ go mod init
 go mod tidy
 ```
 
-### 3. Build the project:
+### 4. Build the project:
 
 ```bash
 cd freeing_up_memory/cmd/monitor
 go build -o freeing_up_memory main.go
 ```
 
-### 4. Run the application:
+### 5. Run the application:
 
 ```bash
 sudo ./freeing_up_memory
