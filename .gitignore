@@ -21,5 +21,9 @@
 go.work
 go.work.sum
 
+# folders
+.idea
+
 # env file
 .env
+/internal/ui/assets/SFMono-Bold.ttf
