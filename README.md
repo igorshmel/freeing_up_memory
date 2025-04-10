@@ -1,7 +1,5 @@
-# freeing_up_memory
+# Freeing up memory
 Freeing up memory for Linux Debian
-
-# Memory Monitor
 
 This project monitors the system's free memory and clears the cache if the free memory drops below a defined threshold. It runs as a background system tray application using the `systray` library and displays the available memory in gigabytes.
 
@@ -30,9 +28,15 @@ git clone https://github.com:igorshmel/freeing_up_memory.git
 cd freeing_up_memory
 ```
 
+### 2. Add font file:  
+
+file: SFMono-Bold.ttf
+path: freeing_up_memory/internal/ui/assets
+
 ### 2. Install dependencies:
 
 ```bash
+go mod init
 go mod tidy
 ```
 
@@ -46,7 +50,7 @@ go build -o freeing_up_memory main.go
 ### 4. Run the application:
 
 ```bash
-./freeing_up_memory
+sudo ./freeing_up_memory
 ```
 
 ## How It Works
