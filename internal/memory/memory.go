@@ -17,7 +17,7 @@ func GetFreeMemory() (uint64, error) {
 }
 
 func ClearCache() error {
-	cmd := exec.Command("sh", "-c", "sync && echo 3 > /proc/sys/vm/drop_caches")
+	cmd := exec.Command("sh", "-c", "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to clear cache: %v", err)
 	}

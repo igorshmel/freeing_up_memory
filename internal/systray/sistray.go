@@ -4,17 +4,20 @@ import (
 	"fmt"
 	"freeing_up_memory/internal/memory"
 	"freeing_up_memory/internal/ui"
-	"github.com/getlantern/systray"
 	tray "github.com/getlantern/systray"
 	"log"
 	"time"
 )
 
 func InitializeTray() {
-	systray.Run(onReady, func() {})
+	tray.Run(onReady, func() {})
 }
 
 func onReady() {
+
+	i := 10
+	fmt.Printf("%d", i)
+
 	freeMem, err := memory.GetFreeMemory()
 	if err != nil {
 		log.Println("Error fetching memory:", err)
