@@ -6,6 +6,7 @@ require (
 	github.com/getlantern/systray v1.2.2
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	golang.org/x/image v0.26.0
+	golang.org/x/sys v0.1.0
 )
 
 require (
@@ -19,6 +20,5 @@ require (
 	github.com/go-stack/stack v1.8.0 // indirect
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	golang.org/x/sys v0.1.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 )

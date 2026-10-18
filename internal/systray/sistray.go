@@ -1,54 +1,39 @@
 package systray
 
 import (
+	"context"
 	"fmt"
-	"freeing_up_memory/internal/memory"
+	"freeing_up_memory/internal/monitor"
 	"freeing_up_memory/internal/ui"
+
 	tray "github.com/getlantern/systray"
-	"log"
-	"time"
 )
 
-func InitializeTray() {
-	tray.Run(onReady, func() {})
-}
-
-func onReady() {
-
-	i := 10
-	fmt.Printf("%d", i)
-
-	freeMem, err := memory.GetFreeMemory()
-	if err != nil {
-		log.Println("Error fetching memory:", err)
-		tray.SetTitle("Err")
-	} else {
-		tray.SetIcon(ui.GenerateIconWithText(fmt.Sprintf("%.1f", float64(freeMem)/1024/1024/1024)))
-	}
-
-	exitItem := tray.AddMenuItem("Exit", "Exit application")
-
-	go func() {
-		for {
-			freeMem, err := memory.GetFreeMemory()
-			if err != nil {
-				log.Println("Error fetching memory:", err)
-				tray.SetTitle("Err")
-			} else {
-				tray.SetIcon(ui.GenerateIconWithText(fmt.Sprintf("%.1f", float64(freeMem)/1024/1024/1024)))
-
-				if freeMem < memory.Threshold {
-					log.Printf("Memory below threshold(%.1fG), clearing cache...", float64(memory.Threshold)/1024/1024/1024)
-					if err := memory.ClearCache(); err != nil {
-						log.Println("Error clearing cache:", err)
+func InitializeTray(ctx context.Context, m *monitor.Monitor, cancel context.CancelFunc) {
+	tray.Run(func() {
+		mark := tray.AddMenuItem("Отметить подвисание", "Записать время нажатия для сопоставления с метриками")
+		exit := tray.AddMenuItem("Exit", "Exit application")
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					tray.Quit()
+					return
+				case <-exit.ClickedCh:
+					cancel()
+					tray.Quit()
+					return
+				case <-mark.ClickedCh:
+					m.MarkStall()
+				case s := <-m.Updates:
+					if s.RAM == nil {
+						tray.SetTitle("Err")
+						continue
 					}
+					tray.SetTitle("")
+					tray.SetIcon(ui.GenerateIconWithText(fmt.Sprintf("%.1f", float64(s.RAM.Free)/(1<<30))))
 				}
 			}
-			time.Sleep(60 * time.Second)
-		}
-	}()
-	go func() {
-		<-exitItem.ClickedCh
-		tray.Quit()
-	}()
+		}()
+	}, cancel)
 }

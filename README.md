@@ -1,65 +1,188 @@
 # Freeing up memory
-Freeing up memory for Linux Debian
 
-This project monitors the system's free memory and clears the cache if the free memory drops below a defined threshold. It runs as a background system tray application using the `systray` library and displays the available memory in gigabytes.
+Утилита для Linux/Debian с числом свободной RAM в системном tray и аварийной очисткой кеша.
+Первая итерация мониторинга сохраняет прежнее условие **`Free < 1 GiB`** и собирает
+данные, необходимые для оценки перехода на `Available`.
 
-## Features
+## Поведение
 
-- Monitors free memory every minute.
-- If free memory is below a threshold (1GB), it automatically clears the cache.
-- Displays the current memory usage in the system tray icon.
-- Provides an "Exit" menu option in the system tray.
+- Первая проверка очистки — при запуске; следующие — через 60 секунд после завершения
+  предыдущего прохода, включая команду очистки и контрольное измерение.
+- Команда: `sync && echo 3 | sudo tee /proc/sys/vm/drop_caches`.
+- Диагностические измерения — сразу и далее каждые 5 секунд в отдельном цикле.
+  Они продолжаются во время очистки. Пропущенные интервалы не накапливаются.
+- Tray по-прежнему показывает **Free в GiB**, обновляясь при проверке очистки.
+- «Отметить подвисание» записывает время нажатия. Если интерфейс зависал, отметка
+  может быть сделана после его восстановления.
+- Выход через меню или SIGTERM останавливает измерения, дожидается уже запущенной
+  очистки и завершает запись очереди логов. Новые очистки при завершении не запускаются.
 
-## Requirements
+В этой итерации нет нового cooldown, переключения условия на Available, управления
+suspend/resume или изменения модели прав. Наблюдение за Available не запускает очистку.
 
-- Go 1.18+ (for building and running the project).
-- `systray` package for system tray support.
-- `gopsutil` package to retrieve memory usage information.
-- A system supporting `exec.Command` for clearing cache (Linux).
+## Сборка и запуск
 
-## Installation
+Нужны Go **1.24+**, C-компилятор и Linux-зависимости `github.com/getlantern/systray`
+(GTK3/AppIndicator; для Debian обычно `libgtk-3-dev` и `libayatana-appindicator3-dev`).
+Используемая версия systray ищет `ayatana-appindicator3-0.1` через pkg-config.
 
-To install and run this project locally, follow these steps:
+Шрифт `internal/ui/assets/SFMono-Bold.ttf` должен присутствовать перед сборкой:
+он встраивается через `go:embed`, но исключён из Git. Используйте имеющуюся локальную
+копию с соответствующими правами на использование.
 
-### 1. Clone the repository:
-
-```bash
-git clone https://github.com:igorshmel/freeing_up_memory.git
-cd freeing_up_memory
-```
-
-### 2. Add font file:  
-
-file: SFMono-Bold.ttf
-path: freeing_up_memory/internal/ui/assets
-
-### 2. Install dependencies:
+Из корня существующего репозитория:
 
 ```bash
-go mod init
-go mod tidy
+go build -o /tmp/freeing_up_memory ./cmd/monitor
+/tmp/freeing_up_memory --help
 ```
 
-### 4. Build the project:
+Запускать приложение нужно в пользовательской графической сессии. Для действующей
+схемы очистки у пользователя должно быть уже настроено право выполнять указанную
+команду через sudo без интерактивного запроса. GUI не требует запуска от root.
+
+| Параметр | По умолчанию | Назначение |
+|---|---|---|
+| `--sample-interval` | `5s` | Положительная длительность между диагностическими измерениями |
+| `--log-dir` | См. ниже | Отдельный каталог JSONL-логов |
+| `--observe-only` | `false` | Исключает и `sync`, и `drop_caches`; сохраняет проверки и измерения |
+
+Интервал диагностики не меняет частоту проверок очистки. Полный конфиг TOML и
+headless-режим в эту итерацию не входят.
+
+Безопасная проверка новой сборки в графической сессии, пока установленный сервис работает:
 
 ```bash
-cd freeing_up_memory/cmd/monitor
-go build -o freeing_up_memory main.go
+/tmp/freeing_up_memory --observe-only --log-dir /tmp/freeing-up-memory-observation
 ```
 
-### 5. Run the application:
+Для параллельной проверки всегда задавайте отдельный каталог. Завершите проверочную
+копию через её меню Exit перед обновлением установленного приложения.
+
+## Хранение и экспорт
+
+Каталог по умолчанию: `$XDG_STATE_HOME/freeing_up_memory/logs`. Если XDG_STATE_HOME
+не задан или не является абсолютным путём — `$HOME/.local/state/freeing_up_memory/logs`.
+Для существующего сервиса от пользователя `shmel` без XDG_STATE_HOME это
+`/home/shmel/.local/state/freeing_up_memory/logs`.
+
+- JSONL: одна JSON-запись на строку, `schema_version=1`.
+- Новый файл при достижении 16 MiB либо смене суток UTC.
+- Общий предел собственных файлов — 256 MiB; срок хранения — до 7 дней.
+  Удаление по возрасту выполняется при старте/ротации. Для следующего файла заранее
+  резервируется 16 MiB, поэтому старые файлы могут удаляться до достижения 256 MiB.
+  При большом потоке записей история будет короче семи дней.
+- Права каталога — `0700`, файлов — `0600`. Используйте выделенный каталог:
+  приложение устанавливает его права и удаляет свои устаревшие файлы.
+- События жизненного цикла, очистки и изменения доступности метрик также идут в stderr;
+  существующий systemd-сервис направляет их в journal.
+- Очередь записи ограничена 256 событиями. Если она переполнена или запись не удалась,
+  растёт `dropped_records_total`. Ошибка записи не останавливает мониторинг/очистку;
+  повторное открытие выполняется через минуту, сообщение об ошибке — не чаще раза в минуту.
+- Приложение не вызывает дополнительный sync/fsync для логов. При аварийном выключении
+  возможны потеря последних записей и неполная последняя строка. Такой хвост при разборе
+  нужно исключить и отметить как потерю данных.
+
+Чтение последних записей (подставьте свой каталог при использовании XDG_STATE_HOME):
 
 ```bash
-sudo ./freeing_up_memory
+tail -n 20 "$HOME"/.local/state/freeing_up_memory/logs/memory-*.jsonl
+journalctl -u freeing_up_memory.service --since today --no-pager
 ```
 
-## How It Works
+Экспорт без остановки сервиса:
 
-- The application checks the system's available memory every minute.
-- If the free memory drops below 1GB, the application attempts to clear the system cache using the `sync` and `drop_caches` command on Linux.
-- The current memory status is displayed in the system tray.
-- You can exit the application by selecting "Exit" from the tray menu.
+```bash
+tar -czf /tmp/freeing-up-memory-logs.tar.gz \
+  -C "$HOME/.local/state/freeing_up_memory" logs
+```
+
+Активный файл во время экспорта может измениться; tar может предупредить об этом.
+Для строгого снимка сначала копируйте нужные файлы в отдельный каталог и анализируйте
+копии, учитывая возможный незавершённый хвост последнего файла.
+
+## Что записывается
+
+Оболочка каждой записи: `timestamp` (UTC), `boot_id`, `run_id`, `sequence`, `type`,
+`dropped_records_total`, `data`. Счётчик потерь накопительный внутри запуска;
+идентификатор очистки уникален в пределах `run_id`. Пропуски sequence также показывают
+утраченные записи. События разных запусков сопоставляйте по boot_id/run_id и времени.
+
+| Событие | Содержание `data` |
+|---|---|
+| `run_started` | Фактические параметры, порог, интервал проверки и команда |
+| `sample` | Snapshot, состояние очистки, интервалы между измерениями |
+| `cleanup_check` | Snapshot, `Free < 1 GiB`, независимые сравнения `Available < 1 / 1.5 / 2 GiB` |
+| `cleanup_would_run` | Срабатывание прежнего условия в observe-only |
+| `cleanup_started` | ID очистки, команда и snapshot перед запуском |
+| `cleanup_finished` | Тот же ID, snapshot до/после, результат, длительность, stderr до 8 KiB и признак усечения |
+| `measurement_error` | Проверка пропущена из-за отсутствия достоверной RAM |
+| `measurement_status` | Изменение ошибок источников либо восстановление |
+| `user_stall_marker` | Время нажатия и текущий ID очистки |
+| `run_finished` | Штатное завершение |
+
+Snapshot содержит:
+
+- `ram`: Total, Free, Available, Used, UsedPercent, Buffers, Cached, SReclaimable,
+  SUnreclaim, Dirty, Writeback, Shmem. Размеры в байтах.
+- `swap`: общий размер, занятый/свободный объём и процент использования;
+  `swap_devices`: размер, использование, тип и приоритет каждого устройства из `/proc/swaps`.
+- `zram`: `original_bytes`, `compressed_bytes`, `memory_used_bytes` из первых трёх
+  полей `mm_stat` каждого активного swap-устройства zram. Это разные величины:
+  использование swap не равно физической RAM, занятой сжатыми данными.
+- `memory_psi`, `io_psi`: `some` и `full`, `avg10_percent`, `avg60_percent`,
+  `avg300_percent`, `total_us`. Эти значения не управляют очисткой.
+- `vmstat`: исходные счётчики `pswpin`, `pswpout` (страницы), `pgmajfault` (события),
+  `pgscan_direct`, `pgsteal_direct` (страницы), `allocstall*` (события).
+  `page_size_bytes` позволяет перевести страницы swap в байты. Счётчики не сбрасываются
+  приложением; скорости вычисляйте по разностям, не через общий SwapUsed.
+- `captured_at`, `monotonic_ns`, `boottime_ns`, `collection_duration_ns`.
+  CLOCK_MONOTONIC исключает сон, CLOCK_BOOTTIME включает. Разность их приращений
+  помогает выделять suspend, даже при изменении календарного времени.
+  Длительность команды — монотонная, без времени сна.
+- `errors`: причины недоступности источников. Недоступные дополнительные источники
+  представлены `null` либо отсутствующим ключом; это не нулевые показатели.
+
+Used соответствует формуле данной версии gopsutil:
+`Total - Free - Buffers - Cached - SReclaimable`, где Cached в наших логах **исключает**
+SReclaimable. UsedPercent = Used / Total × 100; это не `(Total - Available) / Total`.
+SwapUsed = SwapTotal - SwapFree; при отсутствии swap процент равен нулю.
+Snapshot читает несколько системных файлов последовательно и не является атомарным
+снимком. Метка `cleanup_in_progress` отражает состояние при завершении сбора.
+
+Семантика: [PSI](https://docs.kernel.org/accounting/psi.html),
+[zram](https://docs.kernel.org/admin-guide/blockdev/zram.html),
+[drop_caches](https://kernel.org/doc/html/latest/admin-guide/sysctl/vm.html).
+
+## Проверки и внедрение
+
+```bash
+go test ./...
+go test -race ./internal/memory ./internal/monitor ./internal/telemetry
+```
+
+Исполнитель очистки в тестах заменён заглушкой. `TestObserveOnlyPipeline` проверяет
+реальные чтения Linux и запись JSONL без GUI и привилегированных команд.
+
+Для обновления существующего сервиса сохраните копию установленного бинарника,
+замените `/usr/local/bin/freeing_up_memory` проверенной сборкой и перезапустите
+`freeing_up_memory.service`. Пользователь, DISPLAY/XAUTHORITY и sudoers остаются прежними.
+Проверьте `run_started`, появление `sample` примерно раз в 5 секунд и отсутствие ошибок
+записи. Для отката восстановите сохранённый бинарник и перезапустите тот же сервис.
+
+## Как принимать дальнейшее решение
+
+Собирайте данные до нескольких характерных эпизодов обычной и высокой нагрузки.
+Для каждого рассматривайте две минуты до очистки и пять минут после: Free/Available,
+приращения PSI, swap-счётчики, длительность команды и пользовательские отметки.
+Не объединяйте интервалы разных загрузок и не принимайте пропуски данных за отсутствие
+задержек. Интервалы со сном рассматривайте отдельно.
+
+Независимые сравнения порогов показывают, какие нынешние срабатывания новая политика
+пропустила бы. Они не моделируют последующее состояние памяти после изменения политики.
+Наблюдаемый эффект относится к совокупности sync и drop_caches. Улучшение после команды
+само по себе не доказывает причинность: могла одновременно снизиться нагрузка.
 
 ## License
 
-This project is licensed under the  Apache License Version 2.0 - see the [LICENSE](LICENSE) file for details.
+Apache License 2.0, см. [LICENSE](LICENSE).
