@@ -27,3 +27,4 @@ go.work.sum
 # env file
 .env
 /internal/ui/assets/SFMono-Bold.ttf
+cmd/monitor/main
