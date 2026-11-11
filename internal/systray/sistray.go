@@ -31,7 +31,9 @@ func InitializeTray(ctx context.Context, m *monitor.Monitor, cancel context.Canc
 						continue
 					}
 					tray.SetTitle("")
-					tray.SetIcon(ui.GenerateIconWithText(fmt.Sprintf("%.1f", float64(s.RAM.Free)/(1<<30))))
+					// Available, not Free: Free is low whenever the kernel keeps page cache, which it gives back at once.
+					tray.SetIcon(ui.GenerateIconWithText(fmt.Sprintf("%.1f", float64(s.RAM.Available)/(1<<30))))
+					tray.SetTooltip(fmt.Sprintf("доступно %.1f ГиБ · свободно %.1f ГиБ", float64(s.RAM.Available)/(1<<30), float64(s.RAM.Free)/(1<<30)))
 				}
 			}
 		}()
